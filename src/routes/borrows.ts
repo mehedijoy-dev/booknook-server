@@ -85,5 +85,26 @@ router.post("/", async (req: Request, res: Response) => {
     res.status(500).json({ message: "Could not borrow the book" });
   }
 });
+// GET /borrows?email=user@example.com  (newest first)
+router.get("/", async (req: Request, res: Response) => {
+  try {
+    const email = String(req.query.email ?? "");
+    if (!email) {
+      return res.status(400).json({ message: "User email is required" });
+    }
+
+    const db = await getDb();
+    const list = await db
+      .collection<Borrow>("borrows")
+      .find({ userEmail: email })
+      .sort({ borrowDate: -1 })
+      .toArray();
+
+    res.json(list);
+  } catch (error) {
+    console.error("GET /borrows failed:", error);
+    res.status(500).json({ message: "Could not load your borrows" });
+  }
+});
 
 export default router;
