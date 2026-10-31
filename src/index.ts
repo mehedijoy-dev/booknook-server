@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { getDb } from "./db";
 import booksRouter from "./routes/books";
+import borrowsRouter from "./routes/borrows";
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ app.get("/", (_req: Request, res: Response) => {
 });
 
 app.use("/books", booksRouter);
+app.use("/borrows", borrowsRouter);
 
 async function start() {
   try {

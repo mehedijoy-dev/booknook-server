@@ -1,7 +1,7 @@
 import dns from "node:dns";
+import { MongoClient, Db } from "mongodb";
 
 dns.setServers(["8.8.8.8", "1.1.1.1"]);
-import { MongoClient, Db } from "mongodb";
 
 let client: MongoClient | null = null;
 let db: Db | null = null;
@@ -17,6 +17,9 @@ export async function getDb(): Promise<Db> {
   client = new MongoClient(uri);
   await client.connect();
   db = client.db(process.env.DB_NAME || "booknook");
+  await db
+    .collection("borrows")
+    .createIndex({ bookId: 1, userEmail: 1 }, { unique: true });
   console.log("Connected to MongoDB");
   return db;
 }
