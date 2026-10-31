@@ -2,6 +2,7 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { getDb } from "./db";
+import booksRouter from "./routes/books";
 
 dotenv.config();
 
@@ -19,6 +20,8 @@ app.use(express.json());
 app.get("/", (_req: Request, res: Response) => {
   res.json({ message: "BookNook server is running" });
 });
+
+app.use("/books", booksRouter);
 
 async function start() {
   try {
