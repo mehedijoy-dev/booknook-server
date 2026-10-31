@@ -85,6 +85,7 @@ router.post("/", async (req: Request, res: Response) => {
     res.status(500).json({ message: "Could not borrow the book" });
   }
 });
+
 // GET /borrows?email=user@example.com  (newest first)
 router.get("/", async (req: Request, res: Response) => {
   try {
@@ -104,6 +105,48 @@ router.get("/", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("GET /borrows failed:", error);
     res.status(500).json({ message: "Could not load your borrows" });
+  }
+});
+
+// DELETE /borrows/:id?email=user@example.com  (return a book)
+router.delete("/:id", async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid borrow id" });
+    }
+
+    const email = String(req.query.email ?? "");
+
+    const db = await getDb();
+    const borrows = db.collection<Borrow>("borrows");
+    const borrow = await borrows.findOne({ _id: new ObjectId(id) });
+
+    if (!borrow) {
+      return res.status(404).json({ message: "Borrow record not found" });
+    }
+    if (!email || borrow.userEmail !== email) {
+      return res
+        .status(403)
+        .json({ message: "You can only return books you borrowed" });
+    }
+
+    await borrows.deleteOne({ _id: borrow._id });
+
+    // Give the copy back (no error if the book was deleted meanwhile)
+    if (ObjectId.isValid(borrow.bookId)) {
+      await db
+        .collection<Book>("books")
+        .updateOne(
+          { _id: new ObjectId(borrow.bookId) },
+          { $inc: { availableCopies: 1 } },
+        );
+    }
+
+    res.json({ message: "Book returned", returnedId: id });
+  } catch (error) {
+    console.error("DELETE /borrows/:id failed:", error);
+    res.status(500).json({ message: "Could not return the book" });
   }
 });
 
