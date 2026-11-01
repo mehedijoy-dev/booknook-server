@@ -1,5 +1,5 @@
+import { Filter, ObjectId } from "mongodb";
 import { Router, Request, Response } from "express";
-import { ObjectId } from "mongodb";
 import { getDb } from "../db";
 import { AuthUser, requireAuth } from "../middleware/auth";
 import { Book, CATEGORIES, Category } from "../types";
@@ -12,7 +12,13 @@ router.get("/", async (req: Request, res: Response) => {
     const db = await getDb();
     const limit = Math.min(Math.max(Number(req.query.limit) || 0, 0), 100);
 
-    let cursor = db.collection<Book>("books").find().sort({ createdAt: -1 });
+    const addedBy = String(req.query.addedBy ?? "").trim();
+    const filter: Filter<Book> = addedBy ? { "addedBy.email": addedBy } : {};
+
+    let cursor = db
+      .collection<Book>("books")
+      .find(filter)
+      .sort({ createdAt: -1 });
     if (limit > 0) {
       cursor = cursor.limit(limit);
     }
