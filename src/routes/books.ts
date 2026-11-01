@@ -1,11 +1,12 @@
 import { Router, Request, Response } from "express";
 import { ObjectId } from "mongodb";
 import { getDb } from "../db";
+import { AuthUser, requireAuth } from "../middleware/auth";
 import { Book, CATEGORIES, Category } from "../types";
 
 const router = Router();
 
-// GET /books?limit=6  (newest first)
+// GET /books?limit=6  (public, newest first)
 router.get("/", async (req: Request, res: Response) => {
   try {
     const db = await getDb();
@@ -24,12 +25,13 @@ router.get("/", async (req: Request, res: Response) => {
   }
 });
 
-// GET /books/:id
+// GET /books/:id (public)
 router.get("/:id", async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
     if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "Invalid book id" });
+      res.status(400).json({ message: "Invalid book id" });
+      return;
     }
 
     const db = await getDb();
@@ -38,7 +40,8 @@ router.get("/:id", async (req: Request, res: Response) => {
       .findOne({ _id: new ObjectId(id) });
 
     if (!book) {
-      return res.status(404).json({ message: "Book not found" });
+      res.status(404).json({ message: "Book not found" });
+      return;
     }
 
     res.json(book);
@@ -48,47 +51,40 @@ router.get("/:id", async (req: Request, res: Response) => {
   }
 });
 
-// POST /books
-router.post("/", async (req: Request, res: Response) => {
+// POST /books (JWT)
+router.post("/", requireAuth, async (req: Request, res: Response) => {
   try {
-    const {
-      title,
-      author,
-      category,
-      image,
-      description,
-      totalCopies,
-      addedBy,
-    } = req.body ?? {};
+    const user = req.user as AuthUser;
+    const { title, author, category, image, description, totalCopies } =
+      req.body ?? {};
 
     const copies = Number(totalCopies);
 
     if (typeof title !== "string" || !title.trim()) {
-      return res.status(400).json({ message: "Book title is required" });
+      res.status(400).json({ message: "Book title is required" });
+      return;
     }
     if (typeof author !== "string" || !author.trim()) {
-      return res.status(400).json({ message: "Author name is required" });
+      res.status(400).json({ message: "Author name is required" });
+      return;
     }
     if (!(CATEGORIES as readonly string[]).includes(category)) {
-      return res
-        .status(400)
-        .json({ message: "Please choose a valid category" });
+      res.status(400).json({ message: "Please choose a valid category" });
+      return;
     }
     if (typeof image !== "string" || !image.trim()) {
-      return res.status(400).json({ message: "Book image is required" });
+      res.status(400).json({ message: "Book image is required" });
+      return;
     }
     if (typeof description !== "string" || !description.trim()) {
-      return res.status(400).json({ message: "Short description is required" });
+      res.status(400).json({ message: "Short description is required" });
+      return;
     }
     if (!Number.isInteger(copies) || copies < 1) {
-      return res
+      res
         .status(400)
         .json({ message: "Total copies must be a whole number of 1 or more" });
-    }
-    if (!addedBy?.name || !addedBy?.email) {
-      return res
-        .status(400)
-        .json({ message: "Owner name and email are required" });
+      return;
     }
 
     const book: Book = {
@@ -99,7 +95,7 @@ router.post("/", async (req: Request, res: Response) => {
       description: description.trim(),
       totalCopies: copies,
       availableCopies: copies,
-      addedBy: { name: addedBy.name, email: addedBy.email },
+      addedBy: { name: user.name, email: user.email },
       createdAt: new Date(),
     };
 
@@ -113,92 +109,93 @@ router.post("/", async (req: Request, res: Response) => {
   }
 });
 
-// PATCH /books/:id
-router.patch("/:id", async (req: Request, res: Response) => {
+// PATCH /books/:id (JWT, owner only)
+router.patch("/:id", requireAuth, async (req: Request, res: Response) => {
   try {
+    const user = req.user as AuthUser;
     const id = String(req.params.id);
     if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "Invalid book id" });
+      res.status(400).json({ message: "Invalid book id" });
+      return;
     }
     const objectId = new ObjectId(id);
 
-    const {
-      requesterEmail,
-      title,
-      author,
-      category,
-      image,
-      description,
-      totalCopies,
-    } = req.body ?? {};
+    const { title, author, category, image, description, totalCopies } =
+      req.body ?? {};
 
     const db = await getDb();
     const books = db.collection<Book>("books");
     const book = await books.findOne({ _id: objectId });
 
     if (!book) {
-      return res.status(404).json({ message: "Book not found" });
+      res.status(404).json({ message: "Book not found" });
+      return;
     }
-    if (!requesterEmail || book.addedBy.email !== requesterEmail) {
-      return res
-        .status(403)
-        .json({ message: "You can only edit your own books" });
+    if (book.addedBy.email !== user.email) {
+      res.status(403).json({ message: "You can only edit your own books" });
+      return;
     }
 
     const updates: Partial<Book> = {};
 
     if (title !== undefined) {
       if (typeof title !== "string" || !title.trim()) {
-        return res.status(400).json({ message: "Book title cannot be empty" });
+        res.status(400).json({ message: "Book title cannot be empty" });
+        return;
       }
       updates.title = title.trim();
     }
     if (author !== undefined) {
       if (typeof author !== "string" || !author.trim()) {
-        return res.status(400).json({ message: "Author name cannot be empty" });
+        res.status(400).json({ message: "Author name cannot be empty" });
+        return;
       }
       updates.author = author.trim();
     }
     if (category !== undefined) {
       if (!(CATEGORIES as readonly string[]).includes(category)) {
-        return res
-          .status(400)
-          .json({ message: "Please choose a valid category" });
+        res.status(400).json({ message: "Please choose a valid category" });
+        return;
       }
       updates.category = category as Category;
     }
     if (image !== undefined) {
       if (typeof image !== "string" || !image.trim()) {
-        return res.status(400).json({ message: "Book image cannot be empty" });
+        res.status(400).json({ message: "Book image cannot be empty" });
+        return;
       }
       updates.image = image.trim();
     }
     if (description !== undefined) {
       if (typeof description !== "string" || !description.trim()) {
-        return res.status(400).json({ message: "Description cannot be empty" });
+        res.status(400).json({ message: "Description cannot be empty" });
+        return;
       }
       updates.description = description.trim();
     }
     if (totalCopies !== undefined) {
       const copies = Number(totalCopies);
       if (!Number.isInteger(copies) || copies < 1) {
-        return res.status(400).json({
+        res.status(400).json({
           message: "Total copies must be a whole number of 1 or more",
         });
+        return;
       }
       // Copies that are currently borrowed must stay covered
       const borrowed = book.totalCopies - book.availableCopies;
       if (copies < borrowed) {
-        return res.status(400).json({
+        res.status(400).json({
           message: `${borrowed} copies are currently borrowed, so total copies cannot be less than ${borrowed}`,
         });
+        return;
       }
       updates.totalCopies = copies;
       updates.availableCopies = copies - borrowed;
     }
 
     if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ message: "Nothing to update" });
+      res.status(400).json({ message: "Nothing to update" });
+      return;
     }
 
     await books.updateOne({ _id: objectId }, { $set: updates });
@@ -211,28 +208,28 @@ router.patch("/:id", async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /books/:id?email=owner@example.com
-router.delete("/:id", async (req: Request, res: Response) => {
+// DELETE /books/:id (JWT, owner only)
+router.delete("/:id", requireAuth, async (req: Request, res: Response) => {
   try {
+    const user = req.user as AuthUser;
     const id = String(req.params.id);
     if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "Invalid book id" });
+      res.status(400).json({ message: "Invalid book id" });
+      return;
     }
     const objectId = new ObjectId(id);
-
-    const requesterEmail = String(req.query.email ?? "");
 
     const db = await getDb();
     const books = db.collection<Book>("books");
     const book = await books.findOne({ _id: objectId });
 
     if (!book) {
-      return res.status(404).json({ message: "Book not found" });
+      res.status(404).json({ message: "Book not found" });
+      return;
     }
-    if (!requesterEmail || book.addedBy.email !== requesterEmail) {
-      return res
-        .status(403)
-        .json({ message: "You can only delete your own books" });
+    if (book.addedBy.email !== user.email) {
+      res.status(403).json({ message: "You can only delete your own books" });
+      return;
     }
 
     await books.deleteOne({ _id: objectId });
