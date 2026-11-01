@@ -1,24 +1,22 @@
 import { Router, Request, Response } from "express";
 import { ObjectId } from "mongodb";
 import { getDb } from "../db";
+import { AuthUser, requireAuth } from "../middleware/auth";
 import { Book, Borrow } from "../types";
 
 const router = Router();
 
 const BORROW_DAYS = 7;
 
-// POST /borrows
-router.post("/", async (req: Request, res: Response) => {
+// POST /borrows (JWT)
+router.post("/", requireAuth, async (req: Request, res: Response) => {
   try {
-    const { bookId, userName, userEmail } = req.body ?? {};
+    const user = req.user as AuthUser;
+    const { bookId } = req.body ?? {};
 
     if (typeof bookId !== "string" || !ObjectId.isValid(bookId)) {
-      return res.status(400).json({ message: "A valid book id is required" });
-    }
-    if (!userName || !userEmail) {
-      return res
-        .status(400)
-        .json({ message: "User name and email are required" });
+      res.status(400).json({ message: "A valid book id is required" });
+      return;
     }
 
     const db = await getDb();
@@ -28,12 +26,12 @@ router.post("/", async (req: Request, res: Response) => {
 
     const book = await books.findOne({ _id: bookObjectId });
     if (!book) {
-      return res.status(404).json({ message: "Book not found" });
+      res.status(404).json({ message: "Book not found" });
+      return;
     }
     if (book.availableCopies < 1) {
-      return res
-        .status(409)
-        .json({ message: "This book is not available right now" });
+      res.status(409).json({ message: "This book is not available right now" });
+      return;
     }
 
     const borrowDate = new Date();
@@ -44,8 +42,8 @@ router.post("/", async (req: Request, res: Response) => {
       bookId,
       bookTitle: book.title,
       bookImage: book.image,
-      userName,
-      userEmail,
+      userName: user.name,
+      userEmail: user.email,
       borrowDate,
       returnDate,
     };
@@ -57,9 +55,10 @@ router.post("/", async (req: Request, res: Response) => {
       insertedId = result.insertedId;
     } catch (error: unknown) {
       if ((error as { code?: number }).code === 11000) {
-        return res
+        res
           .status(409)
           .json({ message: "You have already borrowed this book" });
+        return;
       }
       throw error;
     }
@@ -74,9 +73,8 @@ router.post("/", async (req: Request, res: Response) => {
     if (!updated) {
       // Someone took the last copy a moment ago, undo our borrow record
       await borrows.deleteOne({ _id: insertedId });
-      return res
-        .status(409)
-        .json({ message: "This book is not available right now" });
+      res.status(409).json({ message: "This book is not available right now" });
+      return;
     }
 
     res.status(201).json({ ...borrow, _id: insertedId });
@@ -86,18 +84,15 @@ router.post("/", async (req: Request, res: Response) => {
   }
 });
 
-// GET /borrows?email=user@example.com  (newest first)
-router.get("/", async (req: Request, res: Response) => {
+// GET /borrows (JWT, only the logged in user's borrows, newest first)
+router.get("/", requireAuth, async (req: Request, res: Response) => {
   try {
-    const email = String(req.query.email ?? "");
-    if (!email) {
-      return res.status(400).json({ message: "User email is required" });
-    }
+    const user = req.user as AuthUser;
 
     const db = await getDb();
     const list = await db
       .collection<Borrow>("borrows")
-      .find({ userEmail: email })
+      .find({ userEmail: user.email })
       .sort({ borrowDate: -1 })
       .toArray();
 
@@ -108,27 +103,29 @@ router.get("/", async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /borrows/:id?email=user@example.com  (return a book)
-router.delete("/:id", async (req: Request, res: Response) => {
+// DELETE /borrows/:id (JWT, return a book)
+router.delete("/:id", requireAuth, async (req: Request, res: Response) => {
   try {
+    const user = req.user as AuthUser;
     const id = String(req.params.id);
     if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "Invalid borrow id" });
+      res.status(400).json({ message: "Invalid borrow id" });
+      return;
     }
-
-    const email = String(req.query.email ?? "");
 
     const db = await getDb();
     const borrows = db.collection<Borrow>("borrows");
     const borrow = await borrows.findOne({ _id: new ObjectId(id) });
 
     if (!borrow) {
-      return res.status(404).json({ message: "Borrow record not found" });
+      res.status(404).json({ message: "Borrow record not found" });
+      return;
     }
-    if (!email || borrow.userEmail !== email) {
-      return res
+    if (borrow.userEmail !== user.email) {
+      res
         .status(403)
         .json({ message: "You can only return books you borrowed" });
+      return;
     }
 
     await borrows.deleteOne({ _id: borrow._id });
