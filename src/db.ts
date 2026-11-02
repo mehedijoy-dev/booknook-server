@@ -1,7 +1,10 @@
 import dns from "node:dns";
 import { MongoClient, Db } from "mongodb";
 
-dns.setServers(["8.8.8.8", "1.1.1.1"]);
+// Local network DNS fix, not needed in production
+if (process.env.NODE_ENV !== "production") {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+}
 
 let client: MongoClient | null = null;
 let db: Db | null = null;
